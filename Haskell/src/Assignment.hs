@@ -11,12 +11,15 @@ module Assignment
     , getTime
     ) where
 
-import Control.Applicative ((<|>))
-import Data.Maybe (listToMaybe)
+import Control.Applicative ((<|>), many, some, Alternative)
+import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Data.Char (isAlpha, isDigit)
+import Data.List (maximumBy, minimumBy)
+import Data.Ord (comparing)
 
 import Instances (ParseError (UnexpectedString), Parser)
-import Parser (failed)
+import Parser (failed, stringTok, charTok, eof, tok, satisfy, int, commaTok, sepBy)
 
 --------------------------------------------------------------------------------
 -- AST
@@ -34,23 +37,44 @@ data ADT = ADT
 data Declaration
     = ConstantDeclaration Identifier Expr
     | VariableDeclaration Identifier Domain
+    | ArrayDeclaration Identifier Domain Domain  -- array[indexDomain] of var valueDomain: name
     deriving (Eq, Show)
 
-data Domain = Range Int Int
+data Domain
+    = Range Int Int  -- low..high (evaluated at parse time)
     deriving (Eq, Show)
 
 data Expr
     = IntLit Int
     | Var Identifier
+    | Add Expr Expr
+    | Sub Expr Expr
+    | Mul Expr Expr
+    | Div Expr Expr
+    | Mod Expr Expr
+    | ArrayIndex Identifier Expr  -- arr[idx]
     deriving (Eq, Show)
 
-data CompareOperator = OpEq
+data CompareOperator
+    = OpEq
+    | OpNeq
+    | OpLt
+    | OpLe
+    | OpGt
+    | OpGe
     deriving (Eq, Show)
 
-data Constraint = Compare CompareOperator Expr Expr
+data Constraint
+    = Compare CompareOperator Expr Expr
+    | AllDifferent [Expr]  -- allDifferent([...])
+    | AllDifferentArray Identifier  -- allDifferent(arr) where arr is an array
+    | AllDifferentGen Identifier Domain Expr  -- allDifferent(i in domain)(expr)
     deriving (Eq, Show)
 
-data SolverGoal = Satisfy
+data SolverGoal
+    = Satisfy
+    | Maximize Expr
+    | Minimize Expr
     deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
