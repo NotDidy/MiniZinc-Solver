@@ -348,7 +348,11 @@ data ConstraintProblem = ConstraintProblem
     }
 
 solveProblem :: ADT -> Maybe [(String, Int)]
-solveProblem adt = listToMaybe (search problem)
+solveProblem adt =
+    case solverGoal adt of
+        Satisfy -> listToMaybe (search problem)
+        Maximize obj -> maximize obj (search problem)
+        Minimize obj -> minimize obj (search problem)
   where
     problem =
         ConstraintProblem
