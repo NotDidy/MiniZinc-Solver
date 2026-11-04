@@ -403,21 +403,28 @@ search p = case remainingDeclarations p of
                         }
     VariableDeclaration name dom : rest -> do
         v <- domainValues p dom
-        search
-            p
-                { remainingDeclarations = rest
-                , solvedVars = (name, v) : solvedVars p
-                }
+        let p' = p { remainingDeclarations = rest, solvedVars = (name, v) : solvedVars p }
+        if constraintsSatisfiedSoFar p'
+            then search p'
+            else []
     ArrayDeclaration name indexDom valueDom : rest -> do
         -- For arrays, we need to generate all combinations of values for each index
         let indices = domainValues p indexDom
         values <- mapM (\_ -> domainValues p valueDom) indices
         let bindings = zipWith (\idx val -> (name ++ "[" ++ show idx ++ "]", val)) indices values
-        search
-            p
-                { remainingDeclarations = rest
-                , solvedVars = bindings ++ solvedVars p
-                }
+        let p' = p { remainingDeclarations = rest, solvedVars = bindings ++ solvedVars p }
+        if constraintsSatisfiedSoFar p'
+            then search p'
+            else []
+
+-- Check all constraints that can be fully evaluated with current assignments.
+-- Returns False immediately if any evaluable constraint is violated (enabling incremental backtracking).
+constraintsSatisfiedSoFar :: ConstraintProblem -> Bool
+constraintsSatisfiedSoFar p =
+    all (\c -> case evalConstraint p c of
+                    Just False -> False  -- constraint violated, prune this branch
+                    _          -> True)  -- True or Nothing (not yet evaluable) -> continue
+        (searchConstraints p)
 
 domainValues :: ConstraintProblem -> Domain -> [Int]
 domainValues _ (Range lo hi) = [lo..hi]
