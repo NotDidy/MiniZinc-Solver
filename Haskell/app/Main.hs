@@ -37,7 +37,7 @@ import qualified Data.Text.Lazy.Encoding as TLE
 import Instances (ParseResult (..), parse)
 import Web.Scotty (ActionM, formParam, json, post, scotty)
 
--- | Convert a list of string pairs to a JSON response.
+-- Convert a list of string pairs to a JSON response.
 jsonResponse :: [(String, String)] -> ActionM ()
 jsonResponse pairs =
     json $
@@ -46,7 +46,7 @@ jsonResponse pairs =
             | (key, value) <- pairs
             ]
 
--- | Convert a SolverResult to a JSON Value for the API response.
+-- Convert a SolverResult to a JSON Value for the API response.
 solverResultToJSON :: SolverResult -> Value
 solverResultToJSON result = object
     [ "solutions" .=
@@ -66,7 +66,7 @@ solverResultToJSON result = object
             ]
     ]
 
--- | Parse the model text and run the given solver action.
+-- Parse the model text and run the given solver action.
 runSolver :: (ADT -> Maybe [(String, Int)]) -> TL.Text -> ActionM ()
 runSolver solver modelText = do
     liftIO $ putStrLn (TL.unpack modelText)
@@ -77,7 +77,7 @@ runSolver solver modelText = do
                 Nothing -> jsonResponse [("result", "No solution")]
                 Just env -> jsonResponse (map (second show) env)
 
--- | Parse the model text and run the stats solver action.
+-- Parse the model text and run the stats solver action.
 runSolverWithStats :: TL.Text -> ActionM ()
 runSolverWithStats modelText = do
     liftIO $ putStrLn (TL.unpack modelText)
@@ -87,14 +87,14 @@ runSolverWithStats modelText = do
             result <- liftIO $ solveProblemWithStats model
             json (solverResultToJSON result)
 
--- | Parse a JSON integer value.
+-- Parse a JSON integer value.
 parseInt :: Value -> Int
 parseInt (String t) = read (T.unpack t) :: Int
 parseInt (Number n) = floor n
 parseInt _ = 0
 
 -- --------------------------------------------------------------------------------
--- | Entry point – launches Scotty web server and defines API routes
+-- Entry point – launches Scotty web server and defines API routes
 main :: IO ()
 main =
     newQSemN 1 >>= \_ -> scotty 3000 $ do

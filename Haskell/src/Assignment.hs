@@ -45,7 +45,7 @@ data Declaration
     deriving (Eq, Show)
 
 data Domain
-    = Range Int Int  -- low..high (evaluated at parse time)
+    = Range Int Int  
     deriving (Eq, Show)
 
 data Expr
@@ -56,7 +56,8 @@ data Expr
     | Mul Expr Expr
     | Div Expr Expr
     | Mod Expr Expr
-    | ArrayIndex Identifier Expr  -- arr[idx]
+    -- arr[idx]
+    | ArrayIndex Identifier Expr  
     deriving (Eq, Show)
 
 data CompareOperator
@@ -96,14 +97,14 @@ data SolverGoal
     | Minimize Expr
     deriving (Eq, Show)
 
--- | Statistics collected during solving
+-- Statistics collected during solving
 data SolverStats = SolverStats
     { nodesExplored :: Int
     , solveTimeMs   :: Double
     , objectiveValue :: Maybe Int
     } deriving (Eq, Show)
 
--- | Complete solver result with all solutions and statistics
+-- Complete solver result with all solutions and statistics
 data SolverResult = SolverResult
     { allSolutions  :: [[(String, Int)]]
     , bestSolution  :: Maybe [(String, Int)]
@@ -146,7 +147,7 @@ data IADT = IADT
 -- Parser (produces IADT with Expr bounds)
 --------------------------------------------------------------------------------
 
--- | Parse a MiniZinc model and evaluate constant expressions to produce an ADT.
+-- Parse a MiniZinc model and evaluate constant expressions to produce an ADT.
 miniZincParser :: Parser ADT
 miniZincParser = do
     iadt <- miniZincParserI
@@ -154,7 +155,7 @@ miniZincParser = do
     eof
     pure adt
 
--- | Parse an intermediate AST (IADT) with unevaluated domain bounds.
+-- Parse an intermediate AST (IADT) with unevaluated domain bounds.
 miniZincParserI :: Parser IADT
 miniZincParserI = do
     decls <- many declarationI
@@ -162,11 +163,11 @@ miniZincParserI = do
     goal <- solveGoal
     pure IADT { ideclarations = decls, iconstraints = constrs, isolverGoal = goal }
 
--- | Parse a single declaration (constant, variable, or array).
+-- Parse a single declaration (constant, variable, or array).
 declarationI :: Parser IDeclaration
 declarationI = constantDeclI <|> variableDeclI <|> arrayDeclI
 
--- | Parse a constant declaration: int: name = expr;
+-- Parse a constant declaration: int: name = expr;
 constantDeclI :: Parser IDeclaration
 constantDeclI = do
     stringTok "int"
@@ -177,7 +178,7 @@ constantDeclI = do
     charTok ';'
     pure $ IConstantDeclaration name e
 
--- | Parse a variable declaration: var domain: name;
+-- Parse a variable declaration: var domain: name;
 variableDeclI :: Parser IDeclaration
 variableDeclI = do
     stringTok "var"
@@ -187,7 +188,7 @@ variableDeclI = do
     charTok ';'
     pure $ IVariableDeclaration name dom
 
--- | Parse an array declaration: array[indexDom] of var valueDom: name;
+-- Parse an array declaration: array[indexDom] of var valueDom: name;
 arrayDeclI :: Parser IDeclaration
 arrayDeclI = do
     stringTok "array"
@@ -202,7 +203,7 @@ arrayDeclI = do
     charTok ';'
     pure $ IArrayDeclaration name indexDom valueDom
 
--- | Parse a domain: lo..hi
+-- Parse a domain: lo to hi
 domainI :: Parser IDomain
 domainI = do
     lo <- expr
@@ -210,7 +211,7 @@ domainI = do
     hi <- expr
     pure $ IRange lo hi
 
--- | Parse a constraint: constraint <body>;
+-- Parse a constraint: constraint <body>;
 constraintI :: Parser IConstraint
 constraintI = do
     stringTok "constraint"
@@ -218,7 +219,7 @@ constraintI = do
     charTok ';'
     pure c
 
--- | Parse a comparison operator (=, !=, <=, <, >=, >)
+-- Parse a comparison operator (=, !=, <=, <, >=, >)
 compareOp :: Parser CompareOperator
 compareOp = (stringTok "=" *> pure OpEq)
         <|> (stringTok "!=" *> pure OpNeq)
@@ -227,11 +228,11 @@ compareOp = (stringTok "=" *> pure OpEq)
         <|> (stringTok ">=" *> pure OpGe)
         <|> (stringTok ">" *> pure OpGt)
 
--- | Parse a constraint body: either a macro or a comparison
+-- Parse a constraint body: either a macro or a comparison
 constraintBodyI :: Parser IConstraint
 constraintBodyI = macroConstraintI <|> compareConstraintI
 
--- | Parse a comparison constraint: expr op expr
+-- Parse a comparison constraint: expr op expr
 compareConstraintI :: Parser IConstraint
 compareConstraintI = do
     a <- expr
@@ -239,7 +240,7 @@ compareConstraintI = do
     b <- expr
     pure $ ICompare op a b
 
--- | Parse a macro constraint (sum, min, max, all, any, allDifferent)
+-- Parse a macro constraint (sum, min, max, all, any, allDifferent)
 -- Each can have literal, array, or generator form.
 -- Numeric macros (sum, min, max) require a comparison operator and RHS expression.
 -- Boolean macros (all, any, allDifferent) do not.
@@ -258,7 +259,7 @@ macroConstraintI = do
             rhs <- expr
             pure $ IMacroConstraint macroName (Just op) form (Just rhs)
 
--- | Parse a macro name (sum, min, max, allDifferent, all, any)
+-- Parse a macro name (sum, min, max, allDifferent, all, any)
 macroNameP :: Parser MacroName
 macroNameP = (stringTok "sum" *> pure MacroSum)
         <|> (stringTok "min" *> pure MacroMin)
@@ -267,7 +268,7 @@ macroNameP = (stringTok "sum" *> pure MacroSum)
         <|> (stringTok "all" *> pure MacroAll)
         <|> (stringTok "any" *> pure MacroAny)
 
--- | Parse a macro form: generator (i in dom)(expr), array (arr), or literal [expr,...]
+-- Parse a macro form: either a generator, an array, or a literal list.
 macroFormP :: Parser IMacroForm
 macroFormP = genForm <|> arrayForm <|> listForm
   where
@@ -291,7 +292,7 @@ macroFormP = genForm <|> arrayForm <|> listForm
         charTok ')'
         pure $ IMacroLiteral es
 
--- | Parse the solve goal: solve satisfy; | solve maximize expr; | solve minimize expr;
+-- Parse the solve goal: satisfy, maximize expr, or minimize expr.
 solveGoal :: Parser SolverGoal
 solveGoal = do
     stringTok "solve"
@@ -301,24 +302,24 @@ solveGoal = do
     charTok ';'
     pure goal
 
--- | Parse an expression (entry point)
+-- Parse an expression with operator precedence and associativity.
 expr :: Parser Expr
 expr = parseAddSub
 
--- | Parse addition and subtraction (lowest precedence)
+-- Parse addition and subtraction (low precedence)
 parseAddSub :: Parser Expr
 parseAddSub = parseMulDiv `chainl1` ((stringTok "+" *> pure Add) <|> (stringTok "-" *> pure Sub))
 
--- | Parse multiplication, division, and modulo (medium precedence)
+-- Parse multiplication, division, and modulo (higher precedence)
 parseMulDiv :: Parser Expr
 parseMulDiv = parseAtom `chainl1`
     ((stringTok "*" *> pure Mul) <|> (stringTok "/" *> pure Div) <|> (stringTok "mod" *> pure Mod))
 
--- | Parse an atomic expression: array index, parenthesized, integer literal, or variable
+-- Parse an atomic expression: integer literal, variable, array index, or parenthesized expression.
 parseAtom :: Parser Expr
 parseAtom = parseArrayIndex <|> parseParen <|> parseIntLit <|> parseVar
 
--- | Parse an array index expression: arr[expr]
+-- Parse an array index expression: name[expr]
 parseArrayIndex :: Parser Expr
 parseArrayIndex = do
     name <- identifier
@@ -327,7 +328,7 @@ parseArrayIndex = do
     charTok ']'
     pure $ ArrayIndex name idx
 
--- | Parse a parenthesized expression: (expr)
+-- Parse a parenthesized expression: (expr)
 parseParen :: Parser Expr
 parseParen = do
     charTok '('
@@ -335,19 +336,19 @@ parseParen = do
     charTok ')'
     pure e
 
--- | Parse an integer literal
+-- Parse an integer literal.
 parseIntLit :: Parser Expr
 parseIntLit = IntLit <$> int
 
--- | Parse a variable reference
+-- Parse a variable identifier.
 parseVar :: Parser Expr
 parseVar = Var <$> identifier
 
--- | Parse an identifier (alphanumeric + underscore)
+-- Parse an identifier (alphanumeric or underscore)
 identifier :: Parser Identifier
 identifier = tok $ some (satisfy (\c -> isAlpha c || isDigit c || c == '_'))
 
--- | Left-associative parser combinator for binary operators
+-- Left-associative parser combinator for binary operators
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 p op = do
     x <- p
@@ -361,7 +362,7 @@ chainl1 p op = do
 
 type ConstEnv = [(Identifier, Int)]
 
--- | Evaluate IADT to ADT by resolving constant expressions in domains.
+-- Evaluate IADT to ADT by resolving constant expressions in domains.
 -- First pass: collect constant declarations.
 -- Second pass: evaluate variable/array domains using constant environment.
 evaluateIADT :: IADT -> Parser ADT
@@ -371,7 +372,7 @@ evaluateIADT iadt = do
     constrs <- mapM (evalConstraintI constEnv) (iconstraints iadt)
     pure ADT { declarations = decls, constraints = constrs, solverGoal = isolverGoal iadt }
 
--- | Collect and evaluate all constant declarations into an environment.
+-- Collect and evaluate all constant declarations into an environment.
 evalConstants :: ConstEnv -> [IDeclaration] -> ConstEnv
 evalConstants env [] = env
 evalConstants env (IConstantDeclaration name e : rest) =
@@ -380,7 +381,7 @@ evalConstants env (IConstantDeclaration name e : rest) =
         Nothing -> evalConstants env rest  -- Should not happen for valid programs
 evalConstants env (_ : rest) = evalConstants env rest
 
--- | Evaluate an IDeclaration to a Declaration using the constant environment.
+-- Evaluate an IDeclaration to a Declaration using the constant environment.
 evalDecl :: ConstEnv -> IDeclaration -> Parser Declaration
 evalDecl env (IConstantDeclaration name e) = pure $ ConstantDeclaration name e
 evalDecl env (IVariableDeclaration name (IRange lo hi)) = do
@@ -394,14 +395,14 @@ evalDecl env (IArrayDeclaration name (IRange lo hi) (IRange lo2 hi2)) = do
     hi2' <- liftMaybe (evalExprPure env hi2) "value upper bound"
     pure $ ArrayDeclaration name (Range lo' hi') (Range lo2' hi2')
 
--- | Evaluate an IConstraint to a Constraint using the constant environment.
+-- Evaluate an IConstraint to a Constraint using the constant environment.
 evalConstraintI :: ConstEnv -> IConstraint -> Parser Constraint
 evalConstraintI env (ICompare op a b) = pure $ Compare op a b
 evalConstraintI env (IMacroConstraint macroName mOp form mRhs) = do
     form' <- evalMacroForm env form
     pure $ MacroConstraint macroName mOp form' mRhs
 
--- | Evaluate a macro form using the constant environment.
+-- Evaluate a macro form using the constant environment.
 evalMacroForm :: ConstEnv -> IMacroForm -> Parser MacroForm
 evalMacroForm env (IMacroLiteral es) = pure $ MacroLiteral es
 evalMacroForm env (IMacroArray ident) = pure $ MacroArray ident
@@ -410,7 +411,7 @@ evalMacroForm env (IMacroGen var (IRange lo hi) body) = do
     hi' <- liftMaybe (evalExprPure env hi) "generator upper bound"
     pure $ MacroGen var (Range lo' hi') body
 
--- | Lift a Maybe value to a Parser, failing with a custom message on Nothing.
+-- Lift a Maybe value to a Parser, failing with a custom message on Nothing.
 liftMaybe :: Maybe a -> String -> Parser a
 liftMaybe (Just x) _ = pure x
 liftMaybe Nothing msg = failed (UnexpectedString ("Failed to evaluate " ++ msg ++ " (referenced constant not defined?)"))
@@ -428,7 +429,7 @@ data ConstraintProblem = ConstraintProblem
     , searchConstraints :: [Constraint]
     }
 
--- | Solve a MiniZinc problem, returning the first/best solution.
+-- Solve a MiniZinc problem, returning the first/best solution.
 solveProblem :: ADT -> Maybe [(String, Int)]
 solveProblem adt =
     case solverGoal adt of
@@ -444,28 +445,28 @@ solveProblem adt =
             , searchConstraints = constraints adt
             }
 
--- | Select the solution with the maximum objective value.
+-- Select the solution with the maximum objective value.
 maximize :: Expr -> [[Binding]] -> Maybe [(String, Int)]
 maximize obj solutions =
     case filter (not . null) solutions of
         [] -> Nothing
         sols -> Just $ maximumBy (comparing (evalObjective obj)) sols
 
--- | Select the solution with the minimum objective value.
+-- Select the solution with the minimum objective value.
 minimize :: Expr -> [[Binding]] -> Maybe [(String, Int)]
 minimize obj solutions =
     case filter (not . null) solutions of
         [] -> Nothing
         sols -> Just $ minimumBy (comparing (evalObjective obj)) sols
 
--- | Evaluate the objective expression under a given set of bindings.
+-- Evaluate the objective expression under a given set of bindings.
 evalObjective :: Expr -> [Binding] -> Int
 evalObjective obj bindings =
     case evalExpr (makeProblem bindings) obj of
         Just v -> v
         Nothing -> 0
 
--- | Create a minimal ConstraintProblem for objective evaluation.
+-- Create a minimal ConstraintProblem for objective evaluation.
 makeProblem :: [Binding] -> ConstraintProblem
 makeProblem bindings =
     ConstraintProblem
@@ -475,12 +476,12 @@ makeProblem bindings =
         , searchConstraints = []
         }
 
--- | Depth-first search for all valid variable assignments.
--- Returns a list of all solutions (each solution is a list of bindings).
+-- DFS search for all valid variable assignments.
+-- Returns a list of all solutions 
 search :: ConstraintProblem -> [[Binding]]
 search p = fst (searchWithCount p)
 
--- | Search with node counting.
+-- Search with node counting.
 -- Each variable assignment and array element increments the node counter.
 searchWithCount :: ConstraintProblem -> ([[Binding]], Int)
 searchWithCount p = go p
@@ -517,11 +518,11 @@ searchWithCount p = go p
                     allValues
             in combineResults results
 
-    -- | Combine multiple (solutions, nodes) results by concatenating solutions and summing nodes.
+    -- Combine results from multiple branches, summing node counts and concatenating solutions.
     combineResults :: [([[Binding]], Int)] -> ([[Binding]], Int)
     combineResults = foldr (\(sols1, n1) (sols2, n2) -> (sols1 ++ sols2, n1 + n2)) ([], 0)
 
--- | Solve a problem with full statistics (nodes, time, objective value).
+-- Check if all constraints are satisfied with the current variable assignments.
 -- Forces strict evaluation of the search to measure actual solve time.
 solveProblemWithStats :: ADT -> IO SolverResult
 solveProblemWithStats adt = do
@@ -559,20 +560,20 @@ solveProblemWithStats adt = do
             , searchConstraints = constraints adt
             }
 
--- | Check all constraints that can be fully evaluated with current assignments.
+-- Check if all constraints are satisfied with the current variable assignments.
 -- Returns False immediately if any evaluable constraint is violated (enabling incremental backtracking).
 constraintsSatisfiedSoFar :: ConstraintProblem -> Bool
 constraintsSatisfiedSoFar p =
     all (\c -> case evalConstraint p c of
-                    Just False -> False  -- constraint violated, prune this branch
-                    _          -> True)  -- True or Nothing (not yet evaluable) -> continue
+                    Just False -> False  -- constraint violated, stop this branch
+                    _          -> True)  -- True or Nothing -> continue
         (searchConstraints p)
 
--- | Get all integer values in a domain range.
+-- Get all integer values in a domain range.
 domainValues :: ConstraintProblem -> Domain -> [Int]
 domainValues _ (Range lo hi) = [lo..hi]
 
--- | Generic expression evaluator parameterized by a variable lookup function.
+-- Evaluate an expression using the current variable assignments.
 -- Returns Nothing for division by zero or unresolved variables.
 evalExprGeneric :: (Identifier -> Maybe Int) -> Expr -> Maybe Int
 evalExprGeneric lookupVar (IntLit n) = Just n
@@ -592,26 +593,26 @@ evalExprGeneric lookupVar (ArrayIndex arr idx) = do
     idx' <- evalExprGeneric lookupVar idx
     lookupVar (arr ++ "[" ++ show idx' ++ "]")
 
--- | Evaluate an expression in the context of a ConstraintProblem.
+-- Evaluate an expression in the context of a ConstraintProblem.
 -- Looks up variables in searchConstants and solvedVars.
 evalExpr :: ConstraintProblem -> Expr -> Maybe Int
 evalExpr p = evalExprGeneric lookupVar
   where
     lookupVar x = lookup x (searchConstants p) <|> lookup x (solvedVars p)
 
--- | Pure evaluation of expressions using only the constant environment.
+-- Pure evaluation of expressions using only the constant environment.
 -- Returns Nothing for division by zero or array indices (not allowed in constants).
 evalExprPure :: ConstEnv -> Expr -> Maybe Int
 evalExprPure env = evalExprGeneric (\x -> lookup x env)
 
--- | Evaluate a constraint, returning Just True/False if fully evaluable, Nothing otherwise.
+-- Evaluate a constraint, returning Just True/False if fully evaluable, Nothing otherwise.
 evalConstraint :: ConstraintProblem -> Constraint -> Maybe Bool
 evalConstraint p (Compare op a b) = applyCompareOp op <$> evalExpr p a <*> evalExpr p b
 evalConstraint p (MacroConstraint macroName mOp form mRhs) = evalMacro p macroName mOp form mRhs
 
--- | Evaluate a macro constraint (sum, min, max, all, any, allDifferent).
--- Numeric macros compare their result with a RHS expression using the given operator.
--- Boolean macros (all, any, allDifferent) check properties of the value list.
+-- Evaluate a macro constraint (sum, min, max, all, any, allDifferent).
+-- Returns Nothing if any variable is unresolved.
+-- Returns Just True/False if fully evaluable, Nothing otherwise.
 evalMacro :: ConstraintProblem -> MacroName -> Maybe CompareOperator -> MacroForm -> Maybe Expr -> Maybe Bool
 evalMacro p macroName mOp form mRhs = do
     vals <- evalMacroFormVals p form
@@ -633,12 +634,12 @@ evalMacro p macroName mOp form mRhs = do
     toBool 0 = False
     toBool _ = True
 
--- | Apply a comparison operator, returning Just Bool if operator is provided.
+-- Apply a comparison operator, returning Just Bool if operator is provided.
 applyCompare :: Maybe CompareOperator -> Int -> Int -> Maybe Bool
 applyCompare (Just op) lhs rhs = Just (applyCompareOp op lhs rhs)
 applyCompare Nothing _ _ = Nothing
 
--- | Apply a concrete comparison operator.
+-- Apply a comparison operator to two integers.
 applyCompareOp :: CompareOperator -> Int -> Int -> Bool
 applyCompareOp OpEq = (==)
 applyCompareOp OpNeq = (/=)
@@ -647,12 +648,12 @@ applyCompareOp OpLe = (<=)
 applyCompareOp OpGt = (>)
 applyCompareOp OpGe = (>=)
 
--- | Check if all elements in a list are distinct.
+-- Check if all elements in a list are distinct.
 allDifferent :: [Int] -> Bool
 allDifferent [] = True
 allDifferent (x:xs) = x `notElem` xs && allDifferent xs
 
--- | Evaluate a macro form to a list of integer values.
+-- Evaluate a macro form to a list of integer values.
 evalMacroFormVals :: ConstraintProblem -> MacroForm -> Maybe [Int]
 evalMacroFormVals p (MacroLiteral es) = mapM (evalExpr p) es
 evalMacroFormVals p (MacroArray arrName) = do
@@ -663,15 +664,15 @@ evalMacroFormVals p (MacroGen var dom body) = do
     let vals = domainValues p dom
     mapM (\v -> evalExpr (p { solvedVars = (var, v) : solvedVars p }) body) vals
 
--- | Check if all constraints are fully satisfied (no Nothing results).
+-- Check if all constraints are fully satisfied (no Nothing results).
 allSatisfied :: ConstraintProblem -> Bool
 allSatisfied p = all ((== Just True) . evalConstraint p) (searchConstraints p)
 
--- | Get current time as a formatted string for filenames.
+-- Get current time as a formatted string for filenames.
 getTime :: IO String
 getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H-%M-%S" <$> getCurrentTime
 
--- | Save a solution to a file with the format:
+-- Save a solution to a file with the format:
 -- -- Generated: <currentTime>
 -- x = 1;
 -- y = 2;

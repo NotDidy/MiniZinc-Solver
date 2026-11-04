@@ -150,7 +150,7 @@ function renderSolutions(solverResult: SolverResultResponse): void {
         const item = document.createElement("div");
         item.className = "solution-item";
         if (isBest) {
-            item.style.backgroundColor = "#e8f5e9";  // Slightly darker green tint for best solution
+            item.style.backgroundColor = "#e8f5e9";  
             item.style.fontWeight = "500";
         }
 
@@ -201,7 +201,7 @@ function main() {
 
             if (output.solverResult) {
                 renderSolutions(output.solverResult);
-                // For save button, use the best solution
+                // Uses best solution if available, otherwise the first solution, or empty if no solutions.
                 lastSolution = JSON.stringify(output.solverResult.bestSolution || output.solverResult.solutions[0] || []);
             } else if (output.error) {
                 statsPanel.style.display = "none";

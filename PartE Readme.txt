@@ -26,55 +26,24 @@ data SolverResult = SolverResult
     , solverStats   :: SolverStats           -- Statistics
     } deriving (Eq, Show)
 
-NEW API ENDPOINT
-----------------
-POST /api/minizinc/solve
-
-
-Example Response (Satisfy):
-{
-  "bestSolution": [{"var":"x","value":1},{"var":"y","value":2}],
-  "solutions": [
-    [{"var":"x","value":1},{"var":"y","value":2}],
-    [{"var":"x","value":1},{"var":"y","value":3}],
-    ...
-  ],
-  "stats": {
-    "nodesExplored": 9,
-    "objectiveValue": null,
-    "solveTimeMs": 0.0
-  }
-}
-
-Example Response (Optimize):
-{
-  "bestSolution": [{"var":"x","value":5},{"var":"y","value":1}],
-  "solutions": [
-    [{"var":"x","value":1},{"var":"y","value":5}],
-    [{"var":"x","value":2},{"var":"y","value":4}],
-    [{"var":"x","value":3},{"var":"y","value":3}],
-    [{"var":"x","value":4},{"var":"y","value":2}],
-    [{"var":"x","value":5},{"var":"y","value":1}]
-  ],
-  "stats": {
-    "nodesExplored": 25,
-    "objectiveValue": 5,
-    "solveTimeMs": 0.0
-  }
-}
 
 HOW IT WORKS
 ------------
 
 1. **searchWithCount Function**
    - Modified the original search function to track nodes explored
-   - Each variable assignment = 1 node
+   - Each variable assignment = 1 node, array elements also counted
    - Uses combineResults to aggregate (solutions, nodes) from all branches
    - Returns `([[Binding]], Int)` - all solutions and total node count
 
-2. **solveProblemWithStats Function**
+2. **search Function (Unified)**
+   - Now calls `searchWithCount` and returns `fst` (solutions only)
+   - Eliminates code duplication between simple and stats search
+
+3. **solveProblemWithStats Function**
    - Calls searchWithCount to get all solutions and node count
    - Measures wall-clock time using getCurrentTime and diffUTCTime
+   - Forces strict evaluation of solutions list before timing (`length solutions \`seq\``)
    - Selects best solution based on solver goal:
      * Satisfy: first solution found
      * Maximize: solution with highest objective value
@@ -82,17 +51,18 @@ HOW IT WORKS
    - Computes objective value for optimization problems
    - Returns complete SolverResult with all data
 
-3. **Web API Integration**
+
+4. **Web API Integration**
    - New endpoint /api/minizinc/solve calls solveProblemWithStats
    - Converts SolverResult to JSON using solverResultToJSON
-   - Original /api/minizinc endpoint unchanged (backward compatible)
+   - Original /api/minizinc endpoint unchanged 
 
 TESTING
 -------
 
 Test 1: Satisfy (multiple solutions)
   var 1..3: x; var 1..3: y; constraint x != y; solve satisfy;
-  -> 6 solutions, 9 nodes, best = (x=1, y=2)
+  -> 6 solutions, 9 nodes, best = (x=1, y=2), time ~0-1ms
 
 Test 2: Maximize
   var 1..5: x; var 1..5: y; constraint x + y = 6; solve maximize x;
@@ -108,12 +78,11 @@ Test 3: N-Queens (8 queens)
 
 FILES MODIFIED
 --------------
-- Haskell/src/Assignment.hs: Added SolverStats, SolverResult, searchWithCount, solveProblemWithStats
-- Haskell/app/Main.hs: Added /api/minizinc/solve endpoint with JSON output
+- Haskell/src/Assignment.hs: SolverStats, SolverResult, searchWithCount, solveProblemWithStats, unified search/evalExpr, isPrefixOf
+- Haskell/app/Main.hs: /api/minizinc/solve endpoint with JSON output, helper functions
+- JS/index.html: "Show all solutions & statistics" toggle, stats panel, solutions list with best highlighting
+- JS/src/main.ts: Dual endpoint logic, renderSolutions with best row highlighting
+- JS/src/types.ts: Solution, SolverResultResponse types
 
-BACKWARD COMPATIBILITY
-----------------------
-- Original `solveProblem` function unchanged
-- Original `/api/minizinc` endpoint unchanged
-- New functionality additive only
+
 
