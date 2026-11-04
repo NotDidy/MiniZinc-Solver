@@ -3,9 +3,9 @@ PART E: All Solutions + Optimization Output
 
 OVERVIEW
 --------
-Part E extends the MiniZinc solver with two major features:
-1. **All Solutions** - Returns ALL valid solutions instead of just the first one
-2. **Optimization Output** - Provides detailed statistics about the solving process
+Part E extends the MiniZinc solver with two new features:
+1. All Solutions - Returns ALL valid solutions instead of just the first one
+2. Optimization Output - Provides detailed statistics about the solving process
 
 NEW DATA TYPES
 --------------
@@ -30,8 +30,6 @@ NEW API ENDPOINT
 ----------------
 POST /api/minizinc/solve
 
-Accepts: form-urlencoded "model" parameter
-Returns: JSON with full SolverResult
 
 Example Response (Satisfy):
 {
@@ -69,25 +67,25 @@ HOW IT WORKS
 ------------
 
 1. **searchWithCount Function**
-   - Modified the original `search` function to track nodes explored
+   - Modified the original search function to track nodes explored
    - Each variable assignment = 1 node
-   - Uses `combineResults` to aggregate (solutions, nodes) from all branches
+   - Uses combineResults to aggregate (solutions, nodes) from all branches
    - Returns `([[Binding]], Int)` - all solutions and total node count
 
 2. **solveProblemWithStats Function**
-   - Calls `searchWithCount` to get all solutions and node count
-   - Measures wall-clock time using `getCurrentTime` and `diffUTCTime`
+   - Calls searchWithCount to get all solutions and node count
+   - Measures wall-clock time using getCurrentTime and diffUTCTime
    - Selects best solution based on solver goal:
      * Satisfy: first solution found
      * Maximize: solution with highest objective value
      * Minimize: solution with lowest objective value
    - Computes objective value for optimization problems
-   - Returns complete `SolverResult` with all data
+   - Returns complete SolverResult with all data
 
 3. **Web API Integration**
-   - New endpoint `/api/minizinc/solve` calls `solveProblemWithStats`
-   - Converts `SolverResult` to JSON using `solverResultToJSON`
-   - Original `/api/minizinc` endpoint unchanged (backward compatible)
+   - New endpoint /api/minizinc/solve calls solveProblemWithStats
+   - Converts SolverResult to JSON using solverResultToJSON
+   - Original /api/minizinc endpoint unchanged (backward compatible)
 
 TESTING
 -------
@@ -119,9 +117,3 @@ BACKWARD COMPATIBILITY
 - Original `/api/minizinc` endpoint unchanged
 - New functionality additive only
 
-USAGE IN WEB UI
----------------
-1. Start server: `stack run` or `.stack-work/dist/.../main.exe`
-2. Open http://localhost:5173
-3. Enter model and click Run (uses original endpoint)
-4. For full stats, call `/api/minizinc/solve` directly via curl or modify frontend
