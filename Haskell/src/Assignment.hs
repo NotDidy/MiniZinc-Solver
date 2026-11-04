@@ -6,8 +6,11 @@ module Assignment
     , Constraint (..)
     , CompareOperator (..)
     , SolverGoal (..)
+    , SolverResult (..)
+    , SolverStats (..)
     , miniZincParser
     , solveProblem
+    , solveProblemWithStats
     , getTime
     , saveSolution
     ) where
@@ -15,6 +18,7 @@ module Assignment
 import Control.Applicative ((<|>), many, some, Alternative)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Data.Time (defaultTimeLocale, formatTime, getCurrentTime, diffUTCTime)
 import Data.Char (isAlpha, isDigit)
 import Data.List (maximumBy, minimumBy)
 import Data.Ord (comparing)
@@ -92,6 +96,20 @@ data SolverGoal
     | Maximize Expr
     | Minimize Expr
     deriving (Eq, Show)
+
+-- | Statistics collected during solving
+data SolverStats = SolverStats
+    { nodesExplored :: Int
+    , solveTimeMs   :: Double
+    , objectiveValue :: Maybe Int
+    } deriving (Eq, Show)
+
+-- | Complete solver result with all solutions and statistics
+data SolverResult = SolverResult
+    { allSolutions  :: [[(String, Int)]]
+    , bestSolution  :: Maybe [(String, Int)]
+    , solverStats   :: SolverStats
+    } deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
 -- Intermediate AST (with Expr bounds for parsing)
@@ -467,6 +485,81 @@ search p = case remainingDeclarations p of
         if constraintsSatisfiedSoFar p'
             then search p'
             else []
+
+-- | Search with node counting (each variable assignment = 1 node)
+-- Returns (all solutions, total nodes explored)
+searchWithCount :: ConstraintProblem -> ([[Binding]], Int)
+searchWithCount p = go p
+  where
+    go prob = case remainingDeclarations prob of
+        [] -> if allSatisfied prob
+                 then ([reverse (solvedVars prob)], 1)
+                 else ([], 1)
+        ConstantDeclaration name e : rest ->
+            case evalExpr prob e of
+                Nothing -> ([], 1)
+                Just v ->
+                    let prob' = prob { remainingDeclarations = rest
+                                     , searchConstants = (name, v) : searchConstants prob }
+                    in go prob'
+        VariableDeclaration name dom : rest ->
+            let results = map (\v ->
+                    let prob' = prob { remainingDeclarations = rest
+                                     , solvedVars = (name, v) : solvedVars prob }
+                    in if constraintsSatisfiedSoFar prob'
+                          then go prob'
+                          else ([], 1))
+                    (domainValues prob dom)
+            in combineResults results
+        ArrayDeclaration name indexDom valueDom : rest ->
+            let indices = domainValues prob indexDom
+                allValues = sequence (replicate (length indices) (domainValues prob valueDom))
+                results = map (\values ->
+                    let bindings = zipWith (\idx val -> (name ++ "[" ++ show idx ++ "]", val)) indices values
+                        prob' = prob { remainingDeclarations = rest
+                                     , solvedVars = bindings ++ solvedVars prob }
+                    in if constraintsSatisfiedSoFar prob'
+                          then go prob'
+                          else ([], 1))
+                    allValues
+            in combineResults results
+
+    -- Combine multiple (solutions, nodes) results by concatenating solutions and summing nodes
+    combineResults :: [([[Binding]], Int)] -> ([[Binding]], Int)
+    combineResults = foldr (\(sols1, n1) (sols2, n2) -> (sols1 ++ sols2, n1 + n2)) ([], 0)
+
+-- | Solve with statistics (nodes explored, time, objective value)
+solveProblemWithStats :: ADT -> IO SolverResult
+solveProblemWithStats adt = do
+    startTime <- getCurrentTime
+    let (solutions, nodes) = searchWithCount problem
+    endTime <- getCurrentTime
+    let solveTimeMs = realToFrac (diffUTCTime endTime startTime) * 1000
+        bestSol = case solverGoal adt of
+            Satisfy -> listToMaybe solutions
+            Maximize obj -> maximize obj solutions
+            Minimize obj -> minimize obj solutions
+        objVal = case (solverGoal adt, bestSol) of
+            (Maximize obj, Just sol) -> Just (evalObjective obj sol)
+            (Minimize obj, Just sol) -> Just (evalObjective obj sol)
+            _ -> Nothing
+    pure SolverResult
+        { allSolutions = solutions
+        , bestSolution = bestSol
+        , solverStats = SolverStats
+            { nodesExplored = nodes
+            , solveTimeMs = solveTimeMs
+            , objectiveValue = objVal
+            }
+        }
+  where
+    problem =
+        ConstraintProblem
+            { searchConstants = []
+            , solvedVars = []
+            , remainingDeclarations = declarations adt
+            , searchConstraints = constraints adt
+            }
 
 -- Check all constraints that can be fully evaluated with current assignments.
 -- Returns False immediately if any evaluable constraint is violated (enabling incremental backtracking).
