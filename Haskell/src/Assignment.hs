@@ -65,11 +65,26 @@ data CompareOperator
     | OpGe
     deriving (Eq, Show)
 
+-- Macro names for constraints
+data MacroName
+    = MacroSum
+    | MacroMin
+    | MacroMax
+    | MacroAll
+    | MacroAny
+    | MacroAllDifferent
+    deriving (Eq, Show)
+
+-- Forms that a macro can take
+data MacroForm
+    = MacroLiteral [Expr]           -- macro([e1, e2, ...])
+    | MacroArray Identifier         -- macro(arr)
+    | MacroGen Identifier Domain Expr  -- macro(i in domain)(expr)
+    deriving (Eq, Show)
+
 data Constraint
     = Compare CompareOperator Expr Expr
-    | AllDifferent [Expr]  -- allDifferent([...])
-    | AllDifferentArray Identifier  -- allDifferent(arr) where arr is an array
-    | AllDifferentGen Identifier Domain Expr  -- allDifferent(i in domain)(expr)
+    | MacroConstraint MacroName (Maybe CompareOperator) MacroForm (Maybe Expr)  -- numeric macros: Just op, Just rhsExpr
     deriving (Eq, Show)
 
 data SolverGoal
@@ -94,9 +109,13 @@ data IDeclaration
 
 data IConstraint
     = ICompare CompareOperator Expr Expr
-    | IAllDifferent [Expr]
-    | IAllDifferentArray Identifier
-    | IAllDifferentGen Identifier IDomain Expr
+    | IMacroConstraint MacroName (Maybe CompareOperator) IMacroForm (Maybe Expr)
+    deriving (Eq, Show)
+
+data IMacroForm
+    = IMacroLiteral [Expr]
+    | IMacroArray Identifier
+    | IMacroGen Identifier IDomain Expr
     deriving (Eq, Show)
 
 data IADT = IADT
@@ -183,7 +202,7 @@ compareOp = (stringTok "=" *> pure OpEq)
         <|> (stringTok ">" *> pure OpGt)
 
 constraintBodyI :: Parser IConstraint
-constraintBodyI = compareConstraintI <|> allDifferentConstraintI
+constraintBodyI = macroConstraintI <|> compareConstraintI
 
 compareConstraintI :: Parser IConstraint
 compareConstraintI = do
@@ -192,11 +211,35 @@ compareConstraintI = do
     b <- expr
     pure $ ICompare op a b
 
-allDifferentConstraintI :: Parser IConstraint
-allDifferentConstraintI = do
-    stringTok "allDifferent"
+-- Parse macro constraints: sum, min, max, all, any, allDifferent
+-- Each can have literal, array, or generator form
+-- Numeric macros (sum, min, max) need comparison operator
+-- Boolean macros (all, any, allDifferent) don't
+macroConstraintI :: Parser IConstraint
+macroConstraintI = do
+    macroName <- macroNameP
     charTok '('
-    genForm <|> arrayForm <|> listForm
+    form <- macroFormP
+    case macroName of
+        MacroAllDifferent -> pure $ IMacroConstraint macroName Nothing form Nothing
+        MacroAll -> pure $ IMacroConstraint macroName Nothing form Nothing
+        MacroAny -> pure $ IMacroConstraint macroName Nothing form Nothing
+        -- Numeric macros need comparison and RHS expression
+        _ -> do
+            op <- compareOp
+            rhs <- expr
+            pure $ IMacroConstraint macroName (Just op) form (Just rhs)
+
+macroNameP :: Parser MacroName
+macroNameP = (stringTok "sum" *> pure MacroSum)
+        <|> (stringTok "min" *> pure MacroMin)
+        <|> (stringTok "max" *> pure MacroMax)
+        <|> (stringTok "allDifferent" *> pure MacroAllDifferent)
+        <|> (stringTok "all" *> pure MacroAll)
+        <|> (stringTok "any" *> pure MacroAny)
+
+macroFormP :: Parser IMacroForm
+macroFormP = genForm <|> arrayForm <|> listForm
   where
     genForm = do
         var <- identifier
@@ -206,15 +249,17 @@ allDifferentConstraintI = do
         charTok '('
         e <- expr
         charTok ')'
-        pure $ IAllDifferentGen var dom e
+        pure $ IMacroGen var dom e
     arrayForm = do
         ident <- identifier
         charTok ')'
-        pure $ IAllDifferentArray ident
+        pure $ IMacroArray ident
     listForm = do
+        charTok '['
         es <- expr `sepBy` commaTok
+        charTok ']'
         charTok ')'
-        pure $ IAllDifferent es
+        pure $ IMacroLiteral es
 
 -- Solver goal parser (same for both ASTs)
 solveGoal :: Parser SolverGoal
@@ -324,12 +369,17 @@ evalDecl env (IArrayDeclaration name (IRange lo hi) (IRange lo2 hi2)) = do
 
 evalConstraintI :: ConstEnv -> IConstraint -> Parser Constraint
 evalConstraintI env (ICompare op a b) = pure $ Compare op a b
-evalConstraintI env (IAllDifferent es) = pure $ AllDifferent es
-evalConstraintI env (IAllDifferentArray ident) = pure $ AllDifferentArray ident
-evalConstraintI env (IAllDifferentGen var (IRange lo hi) body) = do
+evalConstraintI env (IMacroConstraint macroName mOp form mRhs) = do
+    form' <- evalMacroForm env form
+    pure $ MacroConstraint macroName mOp form' mRhs
+
+evalMacroForm :: ConstEnv -> IMacroForm -> Parser MacroForm
+evalMacroForm env (IMacroLiteral es) = pure $ MacroLiteral es
+evalMacroForm env (IMacroArray ident) = pure $ MacroArray ident
+evalMacroForm env (IMacroGen var (IRange lo hi) body) = do
     lo' <- liftMaybe (evalExprPure env lo) "generator lower bound"
     hi' <- liftMaybe (evalExprPure env hi) "generator upper bound"
-    pure $ AllDifferentGen var (Range lo' hi') body
+    pure $ MacroGen var (Range lo' hi') body
 
 liftMaybe :: Maybe a -> String -> Parser a
 liftMaybe (Just x) _ = pure x
@@ -449,39 +499,60 @@ evalExpr p (ArrayIndex arr idx) = do
     lookup (arr ++ "[" ++ show idx' ++ "]") (solvedVars p)
 
 evalConstraint :: ConstraintProblem -> Constraint -> Maybe Bool
-evalConstraint p (Compare op a b) = applyCompare op <$> evalExpr p a <*> evalExpr p b
-evalConstraint p (AllDifferent es) = do
-    vals <- mapM (evalExpr p) es
-    pure $ allDifferent vals
+evalConstraint p (Compare op a b) = applyCompareOp op <$> evalExpr p a <*> evalExpr p b
+evalConstraint p (MacroConstraint macroName mOp form mRhs) = evalMacro p macroName mOp form mRhs
+
+evalMacro :: ConstraintProblem -> MacroName -> Maybe CompareOperator -> MacroForm -> Maybe Expr -> Maybe Bool
+evalMacro p macroName mOp form mRhs = do
+    vals <- evalMacroFormVals p form
+    case macroName of
+        MacroAllDifferent -> pure $ allDifferent vals
+        MacroAll -> pure $ all (toBool) vals
+        MacroAny -> pure $ any (toBool) vals
+        -- Numeric macros: compare macro result with RHS expression
+        MacroSum -> do
+            rhsVal <- evalExpr p =<< mRhs
+            applyCompare mOp (sum vals) rhsVal
+        MacroMin -> do
+            rhsVal <- evalExpr p =<< mRhs
+            applyCompare mOp (minimum vals) rhsVal
+        MacroMax -> do
+            rhsVal <- evalExpr p =<< mRhs
+            applyCompare mOp (maximum vals) rhsVal
   where
-    allDifferent [] = True
-    allDifferent (x:xs) = x `notElem` xs && allDifferent xs
-evalConstraint p (AllDifferentArray arrName) = do
-    -- Find all variables with prefix "arrName["
+    toBool 0 = False
+    toBool _ = True
+
+applyCompare :: Maybe CompareOperator -> Int -> Int -> Maybe Bool
+applyCompare (Just op) lhs rhs = Just (applyCompareOp op lhs rhs)
+applyCompare Nothing _ _ = Nothing
+
+applyCompareOp :: CompareOperator -> Int -> Int -> Bool
+applyCompareOp OpEq = (==)
+applyCompareOp OpNeq = (/=)
+applyCompareOp OpLt = (<)
+applyCompareOp OpLe = (<=)
+applyCompareOp OpGt = (>)
+applyCompareOp OpGe = (>=)
+
+allDifferent :: [Int] -> Bool
+allDifferent [] = True
+allDifferent (x:xs) = x `notElem` xs && allDifferent xs
+
+evalMacroFormVals :: ConstraintProblem -> MacroForm -> Maybe [Int]
+evalMacroFormVals p (MacroLiteral es) = mapM (evalExpr p) es
+evalMacroFormVals p (MacroArray arrName) = do
     let prefix = arrName ++ "["
         vars = [v | (k, v) <- solvedVars p, prefix `startsWith` k]
-    pure $ allDifferent vars
-  where
-    allDifferent [] = True
-    allDifferent (x:xs) = x `notElem` xs && allDifferent xs
-    startsWith [] _ = True
-    startsWith _ [] = False
-    startsWith (x:xs) (y:ys) = x == y && startsWith xs ys
-evalConstraint p (AllDifferentGen var dom body) = do
+    pure vars
+evalMacroFormVals p (MacroGen var dom body) = do
     let vals = domainValues p dom
-    results <- mapM (\v -> evalExpr (p { solvedVars = (var, v) : solvedVars p }) body) vals
-    pure $ allDifferent results
-  where
-    allDifferent [] = True
-    allDifferent (x:xs) = x `notElem` xs && allDifferent xs
+    mapM (\v -> evalExpr (p { solvedVars = (var, v) : solvedVars p }) body) vals
 
-applyCompare :: CompareOperator -> Int -> Int -> Bool
-applyCompare OpEq = (==)
-applyCompare OpNeq = (/=)
-applyCompare OpLt = (<)
-applyCompare OpLe = (<=)
-applyCompare OpGt = (>)
-applyCompare OpGe = (>=)
+startsWith :: Eq a => [a] -> [a] -> Bool
+startsWith [] _ = True
+startsWith _ [] = False
+startsWith (x:xs) (y:ys) = x == y && startsWith xs ys
 
 allSatisfied :: ConstraintProblem -> Bool
 allSatisfied p = all ((== Just True) . evalConstraint p) (searchConstraints p)
