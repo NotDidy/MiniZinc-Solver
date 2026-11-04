@@ -5,13 +5,16 @@
 -- model, parses and solves it, and returns the resulting assignment.
 module Main (main) where
 
-import Assignment (miniZincParser, solveProblem)
+import Assignment (miniZincParser, solveProblem, saveSolution)
 import Control.Arrow (second)
 import Control.Concurrent.QSemN (newQSemN)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (object, (.=))
-import Data.Aeson.Key (fromString)
-import Data.Text.Lazy (Text, pack, unpack)
+import Data.Aeson (object, (.=), eitherDecode, Value (Object, String, Number))
+import Data.Aeson.Key (fromString, toString)
+import Data.Aeson.KeyMap (toList)
+import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TLE
 import Instances (ParseResult (..), parse)
 import Web.Scotty (ActionM, formParam, json, post, scotty)
 
@@ -20,7 +23,7 @@ jsonResponse :: [(String, String)] -> ActionM ()
 jsonResponse pairs =
     json $
         object
-            [ fromString key .= (pack value :: Text) | (key, value) <- pairs
+            [ fromString key .= (TL.pack value :: TL.Text) | (key, value) <- pairs
             ]
 
 -- --------------------------------------------------------------------------------
@@ -29,11 +32,11 @@ main :: IO ()
 main =
     newQSemN 1 >>= \_ -> scotty 3000 $ do
         post "/api/minizinc" $ do
-            modelText <- formParam "model" :: ActionM Text
+            modelText <- formParam "model" :: ActionM TL.Text
 
-            liftIO $ putStrLn (unpack modelText)
+            liftIO $ putStrLn (TL.unpack modelText)
 
-            case parse miniZincParser (unpack modelText) of
+            case parse miniZincParser (TL.unpack modelText) of
                 Error err ->
                     jsonResponse [("error", show err)]
                 Result _ model ->
@@ -42,3 +45,20 @@ main =
                             jsonResponse [("result", "No solution")]
                         Just env ->
                             jsonResponse (map (second show) env)
+
+        post "/api/minizinc/save" $ do
+            solutionText <- formParam "solution" :: ActionM TL.Text
+            case eitherDecode (TLE.encodeUtf8 solutionText) of
+                Left err ->
+                    jsonResponse [("error", "Failed to parse solution: " ++ err)]
+                Right (Object obj) -> do
+                    let solution = [ (toString k, parseInt v) | (k, v) <- toList obj ]
+                    liftIO $ saveSolution solution
+                    jsonResponse [("result", "Solution saved")]
+                Right _ ->
+                    jsonResponse [("error", "Solution must be a JSON object")]
+  where
+    parseInt :: Value -> Int
+    parseInt (String t) = read (T.unpack t) :: Int
+    parseInt (Number n) = floor n
+    parseInt _ = 0

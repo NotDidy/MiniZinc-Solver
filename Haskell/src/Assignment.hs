@@ -9,6 +9,7 @@ module Assignment
     , miniZincParser
     , solveProblem
     , getTime
+    , saveSolution
     ) where
 
 import Control.Applicative ((<|>), many, some, Alternative)
@@ -487,3 +488,16 @@ allSatisfied p = all ((== Just True) . evalConstraint p) (searchConstraints p)
 
 getTime :: IO String
 getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H-%M-%S" <$> getCurrentTime
+
+-- | Save a solution to a file with the format:
+-- -- Generated: <currentTime>
+-- x = 1;
+-- y = 2;
+saveSolution :: [(String, Int)] -> IO ()
+saveSolution solution = do
+    currentTime <- getTime
+    let filename = "solution_" ++ currentTime ++ ".out"
+        header = "-- Generated: " ++ currentTime
+        body = unlines [ name ++ " = " ++ show value ++ ";" | (name, value) <- solution ]
+        content = header ++ "\n" ++ body ++ "\n"
+    writeFile filename content
